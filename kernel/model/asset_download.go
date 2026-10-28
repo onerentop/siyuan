@@ -103,7 +103,11 @@ func validateAssetDownloadSourceScope(scope string) error {
 func checkAssetDownloadAccess() error {
 	confSyncSnapshot := Conf.LoadSync()
 
-	if confSyncSnapshot == nil || !confSyncSnapshot.Enabled || Conf.GetUser() == nil {
+	if confSyncSnapshot == nil || !confSyncSnapshot.Enabled {
+		return errors.New(Conf.Language(376))
+	}
+	// [patched] 仅思源官方云依赖社区账号，第三方 provider 用自身配置即可下载资源
+	if conf.ProviderSiYuan == confSyncSnapshot.Provider && Conf.GetUser() == nil {
 		return errors.New(Conf.Language(376))
 	}
 	switch confSyncSnapshot.Provider {

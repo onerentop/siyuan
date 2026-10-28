@@ -1449,7 +1449,8 @@ func getAssetAbsPath(relativePath string, includeEncrypted bool) (absPath string
 
 // UploadAssets2CloudWithApp 将块资源上传提示限定到发起实例；空标识保留广播。
 func UploadAssets2CloudWithApp(id string, ignorePushMsg bool, app string) (count int, err error) {
-	if !IsSubscriber() {
+	// [patched] 云端资源存储仍需登录，未登录时静默返回，避免弹出无意义的错误
+	if !IsSubscriber() || nil == Conf.GetUser() {
 		return
 	}
 
@@ -1484,7 +1485,8 @@ func UploadAssets2CloudWithApp(id string, ignorePushMsg bool, app string) (count
 
 // UploadAssets2CloudByAssetsPathsWithApp 在同一实例显示、更新和清除本次上传的提示。
 func UploadAssets2CloudByAssetsPathsWithApp(assetPaths []string, ignorePushMsg bool, app string) (count int, err error) {
-	if !IsSubscriber() {
+	// [patched] 云端资源存储仍需登录，未登录时静默返回
+	if !IsSubscriber() || nil == Conf.GetUser() {
 		return
 	}
 

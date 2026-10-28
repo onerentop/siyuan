@@ -71,6 +71,8 @@ func SetCloudReminder(id, content, timed string) (err error) {
 }
 
 func SetBlockReminder(id, timed string) (err error) {
+	// 注意：此函数属性名为 custom-reminder-wechat，内部只走 SetCloudBlockReminder，
+	// 是纯云端功能（微信提醒），不存在本地实现，故保留原有订阅门。
 	if !IsSubscriber() {
 		if "ios" == util.Container {
 			return errors.New(Conf.Language(122))

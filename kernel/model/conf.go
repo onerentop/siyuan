@@ -782,15 +782,32 @@ func closeKernel(force, setCurrentWorkspace bool, execInstallPkg int, recovery *
 			OnKernelPluginsStop()
 		}
 
-		if confSyncSnapshot.Enabled && 3 != confSyncSnapshot.Mode &&
-			((IsSubscriber() && conf.ProviderSiYuan == confSyncSnapshot.Provider) || conf.ProviderSiYuan != confSyncSnapshot.Provider) {
+		// [patched] 退出同步需与 checkSync 保持一致：思源官方云未登录时不尝试同步。
+		// 否则同步失败会让 closeKernel 提前 return，跳过 Conf.Close / sql.CloseDatabase /
+		// ExitKernel，导致 docker stop 卡到超时被 SIGKILL。
+		syncOnExitAllowed := confSyncSnapshot.Enabled && 3 != confSyncSnapshot.Mode
+		if syncOnExitAllowed {
+			switch confSyncSnapshot.Provider {
+			case conf.ProviderWebDAV, conf.ProviderS3, conf.ProviderLocal:
+				// 第三方同步不依赖社区账号
+			default:
+				syncOnExitAllowed = nil != Conf.GetUser()
+			}
+		}
+		if syncOnExitAllowed {
 			diagnostic.Stage("exit sync")
 			if err := syncData(true, false); err != nil {
-				exitCode = 1
-				if 1 != execInstallPkg && !skipNewVerInstallPkg() {
-					installPkgPath = getNewVerInstallPkgPath(false)
+				if util.ContainerDocker == util.Container {
+					// [patched] 容器内 docker stop 只有 10s 宽限：退出同步失败不应阻塞关闭流程，
+					// 否则会跳过 Conf.Close / sql.CloseDatabase / ExitKernel，实例被 SIGKILL。
+					logging.LogWarnf("exit sync failed in container, continue shutting down: %s", err)
+				} else {
+					exitCode = 1
+					if 1 != execInstallPkg && !skipNewVerInstallPkg() {
+						installPkgPath = getNewVerInstallPkgPath(false)
+					}
+					return
 				}
-				return
 			}
 		}
 	}
@@ -1167,20 +1184,22 @@ func InitBoxes() {
 }
 
 func IsSubscriber() bool {
-	u := Conf.GetUser()
-	return nil != u && (-1 == u.UserSiYuanProExpireTime || 0 < u.UserSiYuanProExpireTime) && 0 == u.UserSiYuanSubscriptionStatus
+	// [patched] 关闭订阅校验：本地自建场景下解锁云端同步/备份等付费能力
+	return true
 }
 
 func IsPaidUser() bool {
-	if IsSubscriber() {
-		return true
-	}
+	// [patched] 关闭付费校验：解锁 WebDAV / S3 / 本地等第三方同步与备份
+	return true
+}
 
-	u := Conf.GetUser()
-	if nil == u {
-		return false
+// GetUserSafe [patched] 安全获取当前登录用户：未登录时返回零值用户，
+// 避免 IsSubscriber/IsPaidUser 放宽为恒真后，调用方直接解引用 Conf.GetUser() 导致空指针。
+func GetUserSafe() *conf.User {
+	if user := Conf.GetUser(); nil != user {
+		return user
 	}
-	return 1 == u.UserSiYuanOneTimePayStatus
+	return &conf.User{}
 }
 
 const (

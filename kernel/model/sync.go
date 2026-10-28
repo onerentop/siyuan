@@ -402,8 +402,21 @@ func checkSync(boot, exit, byHand bool) bool {
 		}
 		return false
 	}
-	if nil == Conf.GetUser() {
-		return false
+	// [patched] 仅思源官方云依赖社区账号；WebDAV / S3 / 本地文件系统不需要登录。
+	// buildCloudConf 已在未登录时使用 userId="0" / 空 token，第三方 provider 只用自身配置。
+	// 用反向白名单：未知 provider 一律要求登录，避免异常值绕过校验。
+	switch confSyncReadSnapshot.Provider {
+	case conf.ProviderWebDAV, conf.ProviderS3, conf.ProviderLocal:
+		// 第三方同步不依赖社区账号
+	default:
+		// 未登录时只能走官方云，需要登录；这里不能用 Language(124)
+		// （“请开启云端同步”），因为能走到这里 Enabled 必定为 true。
+		if nil == Conf.GetUser() {
+			if byHand {
+				util.PushMsg(Conf.Language(31), 5000)
+			}
+			return false
+		}
 	}
 
 	switch confSyncReadSnapshot.Provider {
@@ -1251,7 +1264,7 @@ func dialSyncWebSocket() (c *websocket.Conn, err error) {
 	endpoint := util.GetCloudWebSocketServer() + "/apis/siyuan/dejavu/ws"
 	header := http.Header{
 		"User-Agent":        []string{util.UserAgent},
-		"x-siyuan-uid":      []string{Conf.GetUser().UserId},
+		"x-siyuan-uid":      []string{GetUserSafe().UserId}, // [patched] 未登录时不能解引用 nil
 		"x-siyuan-kernel":   []string{KernelID},
 		"x-siyuan-ver":      []string{util.Ver},
 		"x-siyuan-os":       []string{runtime.GOOS},

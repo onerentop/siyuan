@@ -408,6 +408,11 @@ func ExportAv2CSV(avID, blockID string) (zipPath string, err error) {
 }
 
 func Export2Liandi(id string) (err error) {
+	// [patched] 分享到链滴没有本地实现，未登录时直接给可读提示，
+	// 避免带空 token 发请求后弹出 "send article to liandi failed [sc=401]" 这类技术错误。
+	if nil == Conf.GetUser() {
+		return errors.New(Conf.Language(31))
+	}
 	if err = prepareExportBlockAssets(id, false); err != nil {
 		return
 	}
@@ -449,7 +454,7 @@ func Export2Liandi(id string) (err error) {
 			request := httpclient.NewCloudRequest30s()
 			resp, getErr := request.
 				SetSuccessResult(result).
-				SetCookies(&http.Cookie{Name: "symphony", Value: Conf.GetUser().UserToken}).
+				SetCookies(&http.Cookie{Name: "symphony", Value: GetUserSafe().UserToken}).
 				Get(util.GetCloudAccountServer() + "/api/v2/article/update/" + articleId)
 			if nil != getErr {
 				logging.LogErrorf("get liandi article info failed: %s", getErr)
@@ -489,7 +494,7 @@ func Export2Liandi(id string) (err error) {
 				AddTitle:              false,
 				InlineMemo:            false,
 			},
-			CloudAssetsBase:            util.GetCloudForumAssetsServer() + time.Now().Format("2006/01") + "/siyuan/" + Conf.GetUser().UserId + "/",
+			CloudAssetsBase:            util.GetCloudForumAssetsServer() + time.Now().Format("2006/01") + "/siyuan/" + GetUserSafe().UserId + "/",
 			AssetsDestSpace2Underscore: true,
 			AdjustHeadingLevel:         false,
 			ImgTag:                     false,
@@ -504,7 +509,7 @@ func Export2Liandi(id string) (err error) {
 		request := httpclient.NewCloudRequest30s()
 		request = request.
 			SetSuccessResult(result).
-			SetCookies(&http.Cookie{Name: "symphony", Value: Conf.GetUser().UserToken}).
+			SetCookies(&http.Cookie{Name: "symphony", Value: GetUserSafe().UserToken}).
 			SetBody(map[string]any{
 				"articleTitle":   title,
 				"articleTags":    tags,
@@ -2313,8 +2318,9 @@ func ExportStdMarkdown(id string, opts *ExportOptions) string {
 
 		tree := prepareExportTree(bt)
 		cloudAssetsBase := ""
-		if IsSubscriber() {
-			cloudAssetsBase = util.GetCloudAssetsServer() + Conf.GetUser().UserId + "/"
+		// [patched] 未登录时 GetUser() 为 nil，放宽订阅校验后必须显式判空
+		if user := Conf.GetUser(); IsSubscriber() && nil != user {
+			cloudAssetsBase = util.GetCloudAssetsServer() + user.UserId + "/"
 		}
 
 		var defBlockIDs []string

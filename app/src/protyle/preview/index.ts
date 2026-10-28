@@ -292,12 +292,14 @@ export class Preview {
     }
 
     private link2online(copyElement: HTMLElement) {
-        if (needSubscribe("")) {
+        // [patched] 未登录时没有云端资源，不做在线链接改写，保留相对路径
+        if (needSubscribe("") || !window.siyuan.user) {
             return;
         }
         copyElement.querySelectorAll("[href],[src]").forEach(item => {
             const oldLink = item.getAttribute("href") || item.getAttribute("src");
             if (oldLink && oldLink.startsWith("assets/")) {
+                // 上方已拒掉未登录，此处 user 必定存在
                 const newLink = Constants.ASSETS_ADDRESS + window.siyuan.user.userId + "/" + oldLink;
                 if (item.getAttribute("href")) {
                     item.setAttribute("href", newLink);
