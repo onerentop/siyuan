@@ -183,7 +183,8 @@ func buildAnthropicRequest(ctx context.Context, request openai.ChatCompletionReq
 		if tool.Type != openai.ToolTypeFunction || tool.Function == nil {
 			return ret, errors.New("Anthropic Messages only supports function tools in this client")
 		}
-		ret.Tools = append(ret.Tools, anthropicTool{tool.Function.Name, tool.Function.Description, tool.Function.Parameters})
+		ret.Tools = append(ret.Tools, anthropicTool{tool.Function.Name, tool.Function.Description,
+			anthropicInputSchema(tool.Function.Parameters)})
 	}
 	if request.ToolChoice != nil {
 		switch choice := request.ToolChoice.(type) {
@@ -242,7 +243,96 @@ func buildAnthropicRequest(ctx context.Context, request openai.ChatCompletionReq
 		}
 		ret.appendMessage(role, blocks)
 	}
-	return ret, validateAnthropicToolResults(ret.Messages)
+	if err = validateAnthropicToolResults(ret.Messages); err != nil {
+		return
+	}
+	ret.applyPromptCacheBreakpoints()
+	return
+}
+
+// anthropicInputSchema [patched] Messages API 不接受 input_schema 顶层的 oneOf/anyOf/allOf，
+// 发给模型的副本去掉这些组合约束；工具参数仍由内核按完整 schema 校验。
+func anthropicInputSchema(parameters any) any {
+	data, err := json.Marshal(parameters)
+	if err != nil {
+		return parameters
+	}
+	var schema map[string]any
+	if json.Unmarshal(data, &schema) != nil || schema == nil {
+		return parameters
+	}
+	stripped := false
+	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
+		if _, ok := schema[key]; ok {
+			delete(schema, key)
+			stripped = true
+		}
+	}
+	if !stripped {
+		return parameters
+	}
+	return schema
+}
+
+// applyPromptCacheBreakpoints [patched] Messages API 只缓存 cache_control 断点之前的前缀。
+// 在 system 末块、最后一条消息、以及其前一条 user 消息上打 ephemeral 断点（共 3 个，
+// 上限为 4，留 1 个给网关），使多轮对话与工具循环能逐轮命中已缓存的历史。
+func (r *anthropicRequest) applyPromptCacheBreakpoints() {
+	if n := len(r.System); n > 0 {
+		if block, ok := anthropicWithCacheControl(r.System[n-1]); ok {
+			system := append([]json.RawMessage(nil), r.System...)
+			system[n-1] = block
+			r.System = system
+		}
+	}
+	last := len(r.Messages) - 1
+	if last < 0 {
+		return
+	}
+	r.markMessageCacheBreakpoint(last)
+	for i := last - 1; i >= 0; i-- {
+		if r.Messages[i].Role == "user" {
+			r.markMessageCacheBreakpoint(i)
+			break
+		}
+	}
+}
+
+func (r *anthropicRequest) markMessageCacheBreakpoint(index int) {
+	content := r.Messages[index].Content
+	for j := len(content) - 1; j >= 0; j-- {
+		if block, ok := anthropicWithCacheControl(content[j]); ok {
+			cloned := append([]json.RawMessage(nil), content...)
+			cloned[j] = block
+			r.Messages[index].Content = cloned
+			return
+		}
+	}
+}
+
+// anthropicWithCacheControl 返回带 cache_control 的块副本；thinking 类块与空文本不支持断点。
+func anthropicWithCacheControl(raw json.RawMessage) (json.RawMessage, bool) {
+	var block map[string]any
+	if json.Unmarshal(raw, &block) != nil || block == nil {
+		return nil, false
+	}
+	switch block["type"] {
+	case "thinking", "redacted_thinking":
+		return nil, false
+	case "text":
+		if text, _ := block["text"].(string); strings.TrimSpace(text) == "" {
+			return nil, false
+		}
+	}
+	if _, exists := block["cache_control"]; exists {
+		return raw, true
+	}
+	block["cache_control"] = map[string]string{"type": "ephemeral"}
+	data, err := json.Marshal(block)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 func (r *anthropicRequest) appendMessage(role string, blocks []json.RawMessage) {
