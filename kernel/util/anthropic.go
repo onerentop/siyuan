@@ -250,28 +250,64 @@ func buildAnthropicRequest(ctx context.Context, request openai.ChatCompletionReq
 	return
 }
 
-// anthropicInputSchema [patched] Messages API 不接受 input_schema 顶层的 oneOf/anyOf/allOf，
-// 发给模型的副本去掉这些组合约束；工具参数仍由内核按完整 schema 校验。
+// anthropicInputSchema [patched] Messages API 要求 input_schema 顶层为 type=object，
+// 且不接受顶层 oneOf/anyOf/allOf。发给模型的副本去掉这些组合约束并补齐 type/properties；
+// 顶层没有 properties 时合并各 object 变体的属性，避免参数整体丢失。
+// 其余字段（$defs、additionalProperties 等）原样保留，工具参数仍由内核按完整 schema 校验。
 func anthropicInputSchema(parameters any) any {
 	data, err := json.Marshal(parameters)
 	if err != nil {
 		return parameters
 	}
-	var schema map[string]any
-	if json.Unmarshal(data, &schema) != nil || schema == nil {
-		return parameters
+	schema, ok := anthropicDecodeObject(data)
+	if !ok {
+		return map[string]any{"type": "object", "properties": map[string]any{}}
 	}
-	stripped := false
-	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
-		if _, ok := schema[key]; ok {
-			delete(schema, key)
-			stripped = true
+	_, hasProperties := schema["properties"].(map[string]any)
+	hasCombinator := false
+	for _, key := range anthropicSchemaCombinators {
+		if _, exists := schema[key]; exists {
+			hasCombinator = true
 		}
 	}
-	if !stripped {
+	if !hasCombinator && hasProperties && schema["type"] == "object" {
 		return parameters
 	}
+
+	if !hasProperties {
+		merged := map[string]any{}
+		for _, key := range anthropicSchemaCombinators {
+			variants, _ := schema[key].([]any)
+			for _, variant := range variants {
+				object, _ := variant.(map[string]any)
+				properties, _ := object["properties"].(map[string]any)
+				for name, property := range properties {
+					if _, exists := merged[name]; !exists {
+						merged[name] = property
+					}
+				}
+			}
+		}
+		schema["properties"] = merged
+	}
+	for _, key := range anthropicSchemaCombinators {
+		delete(schema, key)
+	}
+	schema["type"] = "object"
 	return schema
+}
+
+var anthropicSchemaCombinators = []string{"oneOf", "anyOf", "allOf"}
+
+// anthropicDecodeObject 解码 JSON 对象并保留数字原文，避免大整数经 float64 往返后失真。
+func anthropicDecodeObject(data []byte) (map[string]any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var object map[string]any
+	if decoder.Decode(&object) != nil || object == nil {
+		return nil, false
+	}
+	return object, true
 }
 
 // applyPromptCacheBreakpoints [patched] Messages API 只缓存 cache_control 断点之前的前缀。
@@ -312,8 +348,8 @@ func (r *anthropicRequest) markMessageCacheBreakpoint(index int) {
 
 // anthropicWithCacheControl 返回带 cache_control 的块副本；thinking 类块与空文本不支持断点。
 func anthropicWithCacheControl(raw json.RawMessage) (json.RawMessage, bool) {
-	var block map[string]any
-	if json.Unmarshal(raw, &block) != nil || block == nil {
+	block, ok := anthropicDecodeObject(raw)
+	if !ok {
 		return nil, false
 	}
 	switch block["type"] {

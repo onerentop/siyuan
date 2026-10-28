@@ -60,3 +60,52 @@ func TestAnthropicCacheBreakpointSkipsThinking(t *testing.T) {
 		t.Fatal("blank text block must not get cache_control")
 	}
 }
+
+func TestAnthropicInputSchemaNormalization(t *testing.T) {
+	marshal := func(value any) string {
+		data, _ := json.Marshal(value)
+		return string(data)
+	}
+
+	// 合法 schema 原样返回，保持请求前缀稳定。
+	plain := json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}`)
+	if got := anthropicInputSchema(plain); marshal(got) != string(plain) {
+		t.Fatalf("valid schema must pass through unchanged: %s", marshal(got))
+	}
+
+	// 参数只定义在顶层 anyOf 变体中：合并属性、补 type，并保留 $defs 引用。
+	rootAnyOf := map[string]any{
+		"$defs": map[string]any{"id": map[string]any{"type": "string"}},
+		"anyOf": []any{
+			map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"$ref": "#/$defs/id"}}, "required": []any{"id"}},
+			map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}},
+		},
+	}
+	got, _ := anthropicInputSchema(rootAnyOf).(map[string]any)
+	properties, _ := got["properties"].(map[string]any)
+	if got["type"] != "object" || len(properties) != 2 || properties["id"] == nil || properties["path"] == nil {
+		t.Fatalf("variant properties must be merged under type=object: %s", marshal(got))
+	}
+	if _, ok := got["anyOf"]; ok {
+		t.Fatalf("top-level anyOf must be removed: %s", marshal(got))
+	}
+	if _, ok := got["$defs"]; !ok {
+		t.Fatalf("$defs must be preserved for $ref: %s", marshal(got))
+	}
+	if _, ok := rootAnyOf["anyOf"]; !ok {
+		t.Fatal("original schema must not be mutated")
+	}
+
+	// 缺 type 与 properties 的空 schema 也要满足 Messages API 的顶层要求。
+	empty, _ := anthropicInputSchema(map[string]any{}).(map[string]any)
+	if empty["type"] != "object" || empty["properties"] == nil {
+		t.Fatalf("empty schema must become an object schema: %s", marshal(empty))
+	}
+}
+
+func TestAnthropicCacheBreakpointPreservesNumbers(t *testing.T) {
+	block, ok := anthropicWithCacheControl(json.RawMessage(`{"type":"text","text":"x","n":9007199254740993}`))
+	if !ok || !strings.Contains(string(block), "9007199254740993") {
+		t.Fatalf("large integers must survive the cache_control rewrite: %s", block)
+	}
+}
