@@ -1539,7 +1539,9 @@ func uploadAssets2CloudWithApp(assetPaths []string, bizType string, ignorePushMs
 	}
 
 	limitSize := uint64(3 * 1024 * 1024) // 3MB
-	if IsSubscriber() {
+	// [patched] 图床上限由服务端按真实订阅执行，本地需按真实订阅判断，
+	// 否则 3~10MB 文件会绕过本地拦截发往云端后被拒
+	if isCloudSubscriber() {
 		limitSize = 10 * 1024 * 1024 // 10MB
 	}
 

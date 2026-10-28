@@ -1193,6 +1193,13 @@ func IsPaidUser() bool {
 	return true
 }
 
+// isCloudSubscriber [patched] 返回云端账号的真实订阅状态（即修改前的 IsSubscriber 逻辑），
+// 仅用于需要与服务端配额保持一致的场景，例如图床上传大小上限。
+func isCloudSubscriber() bool {
+	u := Conf.GetUser()
+	return nil != u && (-1 == u.UserSiYuanProExpireTime || 0 < u.UserSiYuanProExpireTime) && 0 == u.UserSiYuanSubscriptionStatus
+}
+
 // GetUserSafe [patched] 安全获取当前登录用户：未登录时返回零值用户，
 // 避免 IsSubscriber/IsPaidUser 放宽为恒真后，调用方直接解引用 Conf.GetUser() 导致空指针。
 func GetUserSafe() *conf.User {

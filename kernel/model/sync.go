@@ -1166,7 +1166,8 @@ func connectSyncWebSocket() {
 
 	defer logging.Recover()
 
-	if !confSyncReadSnapshot.Enabled || !IsSubscriber() || conf.ProviderSiYuan != confSyncReadSnapshot.Provider {
+	// [patched] IsSubscriber 恒真后需显式要求登录，否则会以空 uid 连接官方云
+	if !confSyncReadSnapshot.Enabled || !IsSubscriber() || conf.ProviderSiYuan != confSyncReadSnapshot.Provider || nil == Conf.GetUser() {
 		return
 	}
 

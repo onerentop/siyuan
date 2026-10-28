@@ -1568,6 +1568,11 @@ func DownloadCloudSnapshot(tag, id string) (err error) {
 
 	switch Conf.Sync.Load().Provider {
 	case conf.ProviderSiYuan:
+		// [patched] 官方云仍依赖社区账号，未登录时给出登录提示，避免带空 token 请求云端
+		if nil == Conf.GetUser() {
+			util.PushErrMsg(Conf.Language(31), 5000)
+			return
+		}
 		if !IsSubscriber() {
 			util.PushErrMsg(Conf.Language(29), 5000)
 			return
@@ -1616,6 +1621,11 @@ func UploadCloudSnapshot(tag, id string) (err error) {
 
 	switch confSyncSnapshot.Provider {
 	case conf.ProviderSiYuan:
+		// [patched] 官方云仍依赖社区账号，未登录时给出登录提示，避免带空 token 请求云端
+		if nil == Conf.GetUser() {
+			util.PushErrMsg(Conf.Language(31), 5000)
+			return
+		}
 		if !IsSubscriber() {
 			util.PushErrMsg(Conf.Language(29), 5000)
 			return
@@ -1636,7 +1646,7 @@ func UploadCloudSnapshot(tag, id string) (err error) {
 			return
 		}
 		if conf.ProviderSiYuan == confSyncSnapshot.Provider && errors.Is(err, dejavu.ErrCloudStorageSizeExceeded) {
-			u := Conf.GetUser()
+			u := GetUserSafe() // [patched] IsSubscriber 恒真后不再隐含已登录
 			msg := fmt.Sprintf(Conf.Language(43), humanize.BytesCustomCeil(uint64(u.UserSiYuanRepoSize), 2))
 			if 2 == u.UserSiYuanSubscriptionPlan {
 				msg = fmt.Sprintf(Conf.Language(68), humanize.BytesCustomCeil(uint64(u.UserSiYuanRepoSize), 2))
@@ -1671,6 +1681,11 @@ func RemoveCloudRepoTag(tag string) (err error) {
 
 	switch Conf.Sync.Load().Provider {
 	case conf.ProviderSiYuan:
+		// [patched] 官方云仍依赖社区账号，未登录时给出登录提示，避免带空 token 请求云端
+		if nil == Conf.GetUser() {
+			util.PushErrMsg(Conf.Language(31), 5000)
+			return
+		}
 		if !IsSubscriber() {
 			util.PushErrMsg(Conf.Language(29), 5000)
 			return
@@ -1707,6 +1722,11 @@ func GetCloudRepoTagSnapshots() (ret []*dejavu.Log, err error) {
 
 	switch Conf.Sync.Load().Provider {
 	case conf.ProviderSiYuan:
+		// [patched] 官方云仍依赖社区账号，未登录时给出登录提示，避免带空 token 请求云端
+		if nil == Conf.GetUser() {
+			util.PushErrMsg(Conf.Language(31), 5000)
+			return
+		}
 		if !IsSubscriber() {
 			util.PushErrMsg(Conf.Language(29), 5000)
 			return
@@ -1751,6 +1771,11 @@ func GetCloudRepoSnapshotsByTime(page int, startTime, endTime int64) (ret []*dej
 
 	switch Conf.Sync.Load().Provider {
 	case conf.ProviderSiYuan:
+		// [patched] 官方云仍依赖社区账号，未登录时给出登录提示，避免带空 token 请求云端
+		if nil == Conf.GetUser() {
+			util.PushErrMsg(Conf.Language(31), 5000)
+			return
+		}
 		if !IsSubscriber() {
 			util.PushErrMsg(Conf.Language(29), 5000)
 			return
@@ -2000,7 +2025,7 @@ func newSyncContext() map[string]any {
 
 func formatSyncRepoErrorMsg(err error) string {
 	if conf.ProviderSiYuan == Conf.Sync.Load().Provider && errors.Is(err, dejavu.ErrCloudStorageSizeExceeded) {
-		u := Conf.GetUser()
+		u := GetUserSafe() // [patched] IsSubscriber 恒真后不再隐含已登录
 		if 2 == u.UserSiYuanSubscriptionPlan {
 			return fmt.Sprintf(Conf.Language(68), humanize.BytesCustomCeil(uint64(u.UserSiYuanRepoSize), 2))
 		}
